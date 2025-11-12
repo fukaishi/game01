@@ -1,24 +1,39 @@
 // ゲームの状態
-let board = ['', '', '', '', '', '', '', '', ''];
+let board = [];
 let currentPlayer = 'O';
 let gameActive = true;
+let currentMode = '3x3';
 
-// 勝利条件のパターン
-const winningConditions = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6]
-];
+// モード設定
+const modeConfigs = {
+    '3x3': {
+        rows: 3,
+        cols: 3,
+        winLength: 3,
+        description: '3×3の盤面で3マス並べると勝利'
+    },
+    '5x5': {
+        rows: 5,
+        cols: 5,
+        winLength: 5,
+        description: '5×5の盤面で5マス並べると勝利'
+    },
+    '3x8': {
+        rows: 3,
+        cols: 8,
+        verticalWin: 3,
+        horizontalWin: 8,
+        diagonalWin: 8,
+        description: '3×8の盤面（縦3マス・横8マス・対角8マス並べると勝利）'
+    }
+};
 
 // DOM要素の取得
-const cells = document.querySelectorAll('.cell');
+const boardElement = document.getElementById('board');
 const statusDisplay = document.getElementById('status');
 const restartButton = document.getElementById('restart');
+const modeButtons = document.querySelectorAll('.mode-btn');
+const modeDescription = document.getElementById('modeDescription');
 
 // メッセージの定義
 const messages = {
@@ -27,13 +42,114 @@ const messages = {
     draw: '引き分けです！'
 };
 
-// ゲームの初期化
-function initGame() {
-    cells.forEach(cell => {
+// ボードの初期化
+function initBoard() {
+    const config = modeConfigs[currentMode];
+    const totalCells = config.rows * config.cols;
+    board = Array(totalCells).fill('');
+
+    // ボードのHTML生成
+    boardElement.innerHTML = '';
+    boardElement.setAttribute('data-mode', currentMode);
+
+    for (let i = 0; i < totalCells; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.setAttribute('data-index', i);
         cell.addEventListener('click', handleCellClick);
-    });
-    restartButton.addEventListener('click', restartGame);
-    updateStatus();
+        boardElement.appendChild(cell);
+    }
+}
+
+// モード変更
+function changeMode(mode) {
+    currentMode = mode;
+    modeDescription.textContent = modeConfigs[mode].description;
+
+    // すべてのモードボタンのactiveクラスを削除
+    modeButtons.forEach(btn => btn.classList.remove('active'));
+
+    // 選択されたモードボタンにactiveクラスを追加
+    document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+
+    // ゲームをリセット
+    restartGame();
+}
+
+// 勝利条件の生成
+function generateWinningConditions() {
+    const config = modeConfigs[currentMode];
+    const conditions = [];
+
+    if (currentMode === '3x8') {
+        // 3x8モード専用の勝利条件
+        const { rows, cols, verticalWin, horizontalWin, diagonalWin } = config;
+
+        // 縦の勝利条件（各列で3マス）
+        for (let col = 0; col < cols; col++) {
+            const line = [];
+            for (let row = 0; row < rows; row++) {
+                line.push(row * cols + col);
+            }
+            conditions.push(line);
+        }
+
+        // 横の勝利条件（各行で8マス全て）
+        for (let row = 0; row < rows; row++) {
+            const line = [];
+            for (let col = 0; col < cols; col++) {
+                line.push(row * cols + col);
+            }
+            conditions.push(line);
+        }
+
+        // 対角線（左上から右下へ8マス必要）
+        // 3x8では対角線は実質不可能なので、長い対角線のみ
+        // 左上(0,0)から右下(2,7)へは8マスないので、可能な対角線を追加
+        // 実際には3行しかないので、8マスの対角線は存在しない
+        // ここでは要件通り「対角線は8マス」とするが、3行8列では物理的に不可能
+        // そのため、対角線での勝利は発生しないことになります
+
+    } else {
+        // 3x3と5x5モードの勝利条件
+        const { rows, cols, winLength } = config;
+
+        // 横の勝利条件
+        for (let row = 0; row < rows; row++) {
+            const line = [];
+            for (let col = 0; col < cols; col++) {
+                line.push(row * cols + col);
+            }
+            conditions.push(line);
+        }
+
+        // 縦の勝利条件
+        for (let col = 0; col < cols; col++) {
+            const line = [];
+            for (let row = 0; row < rows; row++) {
+                line.push(row * cols + col);
+            }
+            conditions.push(line);
+        }
+
+        // 対角線の勝利条件（左上から右下）
+        if (rows === cols) {
+            const diagonal1 = [];
+            for (let i = 0; i < rows; i++) {
+                diagonal1.push(i * cols + i);
+            }
+            conditions.push(diagonal1);
+
+            // 対角線の勝利条件（右上から左下）
+            const diagonal2 = [];
+            for (let i = 0; i < rows; i++) {
+                diagonal2.push(i * cols + (cols - 1 - i));
+            }
+            conditions.push(diagonal2);
+        }
+    }
+
+    return conditions;
 }
 
 // セルがクリックされた時の処理
@@ -60,15 +176,21 @@ function checkResult() {
     let roundWon = false;
     let winningCombination = null;
 
+    const winningConditions = generateWinningConditions();
+
     // 勝利条件をチェック
-    for (let i = 0; i < winningConditions.length; i++) {
-        const [a, b, c] = winningConditions[i];
-        if (board[a] === '' || board[b] === '' || board[c] === '') {
+    for (let condition of winningConditions) {
+        const values = condition.map(index => board[index]);
+
+        // すべてのマスが埋まっているかチェック
+        if (values.includes('')) {
             continue;
         }
-        if (board[a] === board[b] && board[b] === board[c]) {
+
+        // すべてのマスが同じプレイヤーのものかチェック
+        if (values.every(val => val === values[0])) {
             roundWon = true;
-            winningCombination = [a, b, c];
+            winningCombination = condition;
             break;
         }
     }
@@ -78,6 +200,7 @@ function checkResult() {
         statusDisplay.textContent = messages.winner(currentPlayer);
         gameActive = false;
         // 勝利したセルをハイライト
+        const cells = document.querySelectorAll('.cell');
         winningCombination.forEach(index => {
             cells[index].classList.add('winner');
         });
@@ -105,15 +228,27 @@ function updateStatus() {
 
 // ゲームのリスタート
 function restartGame() {
-    board = ['', '', '', '', '', '', '', '', ''];
     currentPlayer = 'O';
     gameActive = true;
+    initBoard();
+    updateStatus();
+}
 
-    cells.forEach(cell => {
-        cell.textContent = '';
-        cell.classList.remove('taken', 'x', 'o', 'winner');
+// ゲームの初期化
+function initGame() {
+    // モードボタンのイベントリスナー
+    modeButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const mode = e.target.getAttribute('data-mode');
+            changeMode(mode);
+        });
     });
 
+    // リスタートボタンのイベントリスナー
+    restartButton.addEventListener('click', restartGame);
+
+    // 初期ボードの生成
+    initBoard();
     updateStatus();
 }
 
