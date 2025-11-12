@@ -1,6 +1,8 @@
 // ゲームの状態
 let board = [];
 let currentPlayer = 'O';
+let humanPlayer = 'O';
+let aiPlayer = 'X';
 let gameActive = true;
 let currentMode = '3x3';
 
@@ -34,11 +36,17 @@ const restartButton = document.getElementById('restart');
 const modeButtons = document.querySelectorAll('.mode-btn');
 const modeDescription = document.getElementById('modeDescription');
 
+// プレイヤー名の取得
+function getPlayerName(player) {
+    return player === humanPlayer ? 'プレイヤー' : 'コンピュータ';
+}
+
 // メッセージの定義
 const messages = {
-    currentTurn: (player) => `プレイヤー ${player} の番です`,
-    winner: (player) => `プレイヤー ${player} の勝利！`,
-    draw: '引き分けです！'
+    currentTurn: (player) => `${getPlayerName(player)}の番です`,
+    winner: (player) => `${getPlayerName(player)}の勝利！`,
+    draw: '引き分けです！',
+    thinking: 'コンピュータが考え中...'
 };
 
 // ボードの初期化
@@ -82,7 +90,7 @@ function generateWinningConditions() {
 
     if (currentMode === '3x8') {
         // 3x8モード専用の勝利条件
-        const { rows, cols, verticalWin, horizontalWin } = config;
+        const { rows, cols } = config;
 
         // 縦の勝利条件（各列で3マス）
         for (let col = 0; col < cols; col++) {
@@ -123,7 +131,7 @@ function generateWinningConditions() {
 
     } else {
         // 3x3と5x5モードの勝利条件
-        const { rows, cols, winLength } = config;
+        const { rows, cols } = config;
 
         // 横の勝利条件
         for (let row = 0; row < rows; row++) {
@@ -163,71 +171,198 @@ function generateWinningConditions() {
     return conditions;
 }
 
-// セルがクリックされた時の処理
-function handleCellClick(event) {
-    const cell = event.target;
-    const index = parseInt(cell.getAttribute('data-index'));
-
-    // すでにマークがある、またはゲームが終了している場合は何もしない
-    if (board[index] !== '' || !gameActive) {
-        return;
-    }
-
-    // セルを更新
-    board[index] = currentPlayer;
-    cell.textContent = currentPlayer;
-    cell.classList.add('taken', currentPlayer.toLowerCase());
-
-    // 勝敗をチェック
-    checkResult();
-}
-
-// 勝敗のチェック
-function checkResult() {
-    let roundWon = false;
-    let winningCombination = null;
-
+// 勝者をチェック
+function checkWinner(testBoard) {
     const winningConditions = generateWinningConditions();
 
-    // 勝利条件をチェック
     for (let condition of winningConditions) {
-        const values = condition.map(index => board[index]);
+        const values = condition.map(index => testBoard[index]);
 
-        // すべてのマスが埋まっているかチェック
         if (values.includes('')) {
             continue;
         }
 
-        // すべてのマスが同じプレイヤーのものかチェック
         if (values.every(val => val === values[0])) {
-            roundWon = true;
-            winningCombination = condition;
-            break;
+            return { winner: values[0], combination: condition };
         }
     }
 
-    if (roundWon) {
-        // 勝者がいる場合
-        statusDisplay.textContent = messages.winner(currentPlayer);
-        gameActive = false;
-        // 勝利したセルをハイライト
-        const cells = document.querySelectorAll('.cell');
-        winningCombination.forEach(index => {
-            cells[index].classList.add('winner');
-        });
+    // 引き分けチェック
+    if (!testBoard.includes('')) {
+        return { winner: 'draw', combination: null };
+    }
+
+    return { winner: null, combination: null };
+}
+
+// AIの評価関数
+function evaluate(testBoard) {
+    const result = checkWinner(testBoard);
+
+    if (result.winner === aiPlayer) {
+        return 10;
+    } else if (result.winner === humanPlayer) {
+        return -10;
+    } else {
+        return 0;
+    }
+}
+
+// ミニマックスアルゴリズム（アルファベータ枝刈り付き）
+function minimax(testBoard, depth, isMaximizing, alpha, beta) {
+    const result = checkWinner(testBoard);
+
+    // 終了状態のチェック
+    if (result.winner !== null) {
+        if (result.winner === 'draw') {
+            return 0;
+        }
+        const score = evaluate(testBoard);
+        // 深さによるペナルティ（早く勝つ方が良い）
+        return score > 0 ? score - depth : score + depth;
+    }
+
+    // 深さ制限（5x5と3x8モード用）
+    const maxDepth = currentMode === '3x3' ? 9 : (currentMode === '5x5' ? 4 : 3);
+    if (depth >= maxDepth) {
+        return 0;
+    }
+
+    const availableMoves = testBoard.map((val, idx) => val === '' ? idx : null).filter(val => val !== null);
+
+    if (isMaximizing) {
+        let maxScore = -Infinity;
+        for (let move of availableMoves) {
+            testBoard[move] = aiPlayer;
+            const score = minimax(testBoard, depth + 1, false, alpha, beta);
+            testBoard[move] = '';
+            maxScore = Math.max(maxScore, score);
+            alpha = Math.max(alpha, score);
+            if (beta <= alpha) {
+                break; // ベータカット
+            }
+        }
+        return maxScore;
+    } else {
+        let minScore = Infinity;
+        for (let move of availableMoves) {
+            testBoard[move] = humanPlayer;
+            const score = minimax(testBoard, depth + 1, true, alpha, beta);
+            testBoard[move] = '';
+            minScore = Math.min(minScore, score);
+            beta = Math.min(beta, score);
+            if (beta <= alpha) {
+                break; // アルファカット
+            }
+        }
+        return minScore;
+    }
+}
+
+// AIの最適な手を見つける
+function findBestMove() {
+    let bestScore = -Infinity;
+    let bestMove = -1;
+
+    const availableMoves = board.map((val, idx) => val === '' ? idx : null).filter(val => val !== null);
+
+    // 3x3モードの最初の手は中央または角を優先（高速化）
+    if (currentMode === '3x3' && availableMoves.length === 9) {
+        const strategicMoves = [4, 0, 2, 6, 8]; // 中央、角
+        for (let move of strategicMoves) {
+            if (availableMoves.includes(move)) {
+                return move;
+            }
+        }
+    }
+
+    for (let move of availableMoves) {
+        board[move] = aiPlayer;
+        const score = minimax([...board], 0, false, -Infinity, Infinity);
+        board[move] = '';
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+        }
+    }
+
+    return bestMove;
+}
+
+// AIのターン処理
+function aiMove() {
+    if (!gameActive || currentPlayer !== aiPlayer) {
         return;
     }
 
-    // 引き分けチェック
-    if (!board.includes('')) {
-        statusDisplay.textContent = messages.draw;
+    statusDisplay.textContent = messages.thinking;
+
+    // 少し待ってから手を打つ（自然に見せるため）
+    setTimeout(() => {
+        const bestMove = findBestMove();
+
+        if (bestMove !== -1) {
+            makeMove(bestMove);
+        }
+    }, 500);
+}
+
+// 手を打つ
+function makeMove(index) {
+    if (board[index] !== '' || !gameActive) {
+        return;
+    }
+
+    board[index] = currentPlayer;
+    const cells = document.querySelectorAll('.cell');
+    cells[index].textContent = currentPlayer;
+    cells[index].classList.add('taken', currentPlayer.toLowerCase());
+
+    checkResult();
+}
+
+// セルがクリックされた時の処理
+function handleCellClick(event) {
+    // プレイヤーのターンでない場合は何もしない
+    if (currentPlayer !== humanPlayer || !gameActive) {
+        return;
+    }
+
+    const cell = event.target;
+    const index = parseInt(cell.getAttribute('data-index'));
+
+    makeMove(index);
+}
+
+// 勝敗のチェック
+function checkResult() {
+    const result = checkWinner(board);
+
+    if (result.winner) {
         gameActive = false;
+        const cells = document.querySelectorAll('.cell');
+
+        if (result.winner === 'draw') {
+            statusDisplay.textContent = messages.draw;
+        } else {
+            statusDisplay.textContent = messages.winner(result.winner);
+            // 勝利したセルをハイライト
+            result.combination.forEach(index => {
+                cells[index].classList.add('winner');
+            });
+        }
         return;
     }
 
     // プレイヤーを切り替え
     currentPlayer = currentPlayer === 'O' ? 'X' : 'O';
     updateStatus();
+
+    // AIのターンなら自動で打つ
+    if (currentPlayer === aiPlayer) {
+        aiMove();
+    }
 }
 
 // ステータスメッセージの更新
@@ -239,10 +374,20 @@ function updateStatus() {
 
 // ゲームのリスタート
 function restartGame() {
-    currentPlayer = 'O';
+    // ランダムに先攻後攻を決定
+    const playerGoesFirst = Math.random() < 0.5;
+    humanPlayer = playerGoesFirst ? 'O' : 'X';
+    aiPlayer = playerGoesFirst ? 'X' : 'O';
+    currentPlayer = 'O'; // Oが常に先攻
+
     gameActive = true;
     initBoard();
     updateStatus();
+
+    // AIが先攻の場合は自動で打つ
+    if (currentPlayer === aiPlayer) {
+        aiMove();
+    }
 }
 
 // ゲームの初期化
@@ -259,8 +404,7 @@ function initGame() {
     restartButton.addEventListener('click', restartGame);
 
     // 初期ボードの生成
-    initBoard();
-    updateStatus();
+    restartGame();
 }
 
 // ゲーム開始
