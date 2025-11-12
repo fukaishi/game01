@@ -23,8 +23,7 @@ const modeConfigs = {
         cols: 8,
         verticalWin: 3,
         horizontalWin: 8,
-        diagonalWin: 8,
-        description: '3×8の盤面（縦3マス・横8マス・対角8マス並べると勝利）'
+        description: '3×8の盤面（縦・斜め3マス、横8マス並べると勝利）'
     }
 };
 
@@ -83,7 +82,7 @@ function generateWinningConditions() {
 
     if (currentMode === '3x8') {
         // 3x8モード専用の勝利条件
-        const { rows, cols, verticalWin, horizontalWin, diagonalWin } = config;
+        const { rows, cols, verticalWin, horizontalWin } = config;
 
         // 縦の勝利条件（各列で3マス）
         for (let col = 0; col < cols; col++) {
@@ -103,12 +102,24 @@ function generateWinningConditions() {
             conditions.push(line);
         }
 
-        // 対角線（左上から右下へ8マス必要）
-        // 3x8では対角線は実質不可能なので、長い対角線のみ
-        // 左上(0,0)から右下(2,7)へは8マスないので、可能な対角線を追加
-        // 実際には3行しかないので、8マスの対角線は存在しない
-        // ここでは要件通り「対角線は8マス」とするが、3行8列では物理的に不可能
-        // そのため、対角線での勝利は発生しないことになります
+        // 対角線の勝利条件（3マス連続）
+        // 左上から右下への対角線（3マス）
+        for (let startCol = 0; startCol <= cols - rows; startCol++) {
+            const line = [];
+            for (let i = 0; i < rows; i++) {
+                line.push(i * cols + (startCol + i));
+            }
+            conditions.push(line);
+        }
+
+        // 右上から左下への対角線（3マス）
+        for (let startCol = rows - 1; startCol < cols; startCol++) {
+            const line = [];
+            for (let i = 0; i < rows; i++) {
+                line.push(i * cols + (startCol - i));
+            }
+            conditions.push(line);
+        }
 
     } else {
         // 3x3と5x5モードの勝利条件
